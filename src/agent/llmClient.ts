@@ -1,27 +1,6 @@
 import {WebSocket} from "ws"
 import OpenAI from "openai"
-
-interface Utterance {
-    role: "agent" | "user", 
-    content: string
-}
-
-export interface RetellRequest {
-    response_id?: number, 
-    transcript: Utterance[],
-    interaction_type: "update_only" | "response_required" | "reminder_required" 
-}
-
-
-
-export interface RetellResponse {
-    response_type: "response",
-    response_id?: number, 
-    content: string, 
-    content_complete: boolean, 
-    end_call: boolean 
-}
-
+import { FunctionCall, RetellRequest, RetellResponse, Utterance} from "../types"
 
 
 const beginSentence = "Hey Naman, this is Laila. How are you doing today?"
@@ -34,8 +13,6 @@ export class LlmClient {
             apiKey: process.env.OPENAI_APIKEY, 
             organization: process.env.OPENAI_ORGANIZATION_ID, 
         })
-        console.log(this.client.apiKey)
-        console.log(this.client.organization)
     }
 
     BeginMessage(ws: WebSocket) {
@@ -81,47 +58,108 @@ export class LlmClient {
         }
         return requestMessages; 
     }
+    
 
     async DraftResponse(request: RetellRequest, ws: WebSocket) {
         const requestMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = this.PreparePrompt(request)
+        let funcCall: FunctionCall | undefined
+        let funcArguments = ""
+
         if (request.interaction_type == "update_only") {
             return
         }
         try {
+            const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+                {
+                    type: "function",
+                    function: {
+                      name: "end_call",
+                      description: "End the call only when user explicitly requests it.",
+                      parameters: {
+                        type: "object",
+                        properties: {
+                          message: {
+                            type: "string",
+                            description:
+                              "Thanks Naman for spending time with me. Take care",
+                          },
+                        },
+                        required: ["message"],
+                      },
+                    },
+                  },
+            ]
             const events = await this.client.chat.completions.create({
                 model: "gpt-3.5-turbo-1106", 
                 messages: requestMessages, 
                 stream: true, 
                 temperature: 0.3, 
                 frequency_penalty: 1, 
-                max_tokens: 200 
+                presence_penalty: 1, 
+                max_tokens: 200, 
+                tools: tools,
             })
             for await (const event of events) {
                 if (event.choices.length >= 1) {
                     let delta = event.choices[0].delta
-                    if (!delta || !delta.content) continue
-                    const res : RetellResponse = {
-                        response_type: "response",
-                        response_id: request.response_id,
-                        content: delta.content, 
-                        content_complete: false, 
-                        end_call: false
+                    if (!delta) continue
+
+                    if (delta.tool_calls && delta.tool_calls.length >= 1) {
+                        const toolCall = delta.tool_calls[0];
+                        // Function calling here
+                        if (toolCall.id) {
+                          if (funcCall) {
+                            // Another function received, old function complete, can break here
+                            // You can also modify this to parse more functions to unlock parallel function calling
+                            break;
+                          } else {
+                            funcCall = {
+                              id: toolCall.id,
+                              funcName: toolCall.function?.name || "",
+                              arguments: {},
+                            };
+                          }
+                        } else {
+                          // append argument
+                          funcArguments += toolCall.function?.arguments || "";
+                        }
+                      } else if (delta.content) {
+                        const res : RetellResponse = {
+                            response_type: "response",
+                            response_id: request.response_id,
+                            content: delta.content, 
+                            content_complete: false, 
+                            end_call: false
+                        }
+                        ws.send(JSON.stringify(res))
                     }
-                    ws.send(JSON.stringify(res))
                 }
-            }
-           
+            }     
         } catch (err) {
             console.error("Error in gpt stream", err)
         } finally {
-            const res: RetellResponse = {
-                response_type: "response", 
-                response_id: request.response_id, 
-                content: "", 
-                content_complete: true, 
-                end_call: false
+            if (funcCall != null) {
+                if (funcCall.funcName === "end_call") {
+                    funcCall.arguments = JSON.parse(funcArguments) 
+                    const res: RetellResponse = {
+                        response_type: "response", 
+                        response_id: request.response_id, 
+                        content: funcCall.arguments.message, 
+                        content_complete: true, 
+                        end_call: true
+                    }
+                    ws.send(JSON.stringify(res)) 
+                }
+            } else {
+                const res: RetellResponse = {
+                    response_type: "response", 
+                    response_id: request.response_id, 
+                    content: "", 
+                    content_complete: true, 
+                    end_call: false
+                }
+                ws.send(JSON.stringify(res))
             }
-            ws.send(JSON.stringify(res))
         }
     }
 }

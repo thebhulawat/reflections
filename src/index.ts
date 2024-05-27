@@ -3,13 +3,18 @@ import expressWs  from 'express-ws'
 import {RawData, WebSocket} from 'ws'
 import { LlmClient} from './agent/llmClient';
 import dotenv from 'dotenv'
+import fs from 'fs'
 
 
 declare module 'express-serve-static-core' {
     interface Express extends Application {}
   }
 
-dotenv.config({ path: `.env.${process.env.NODE_ENV}` });
+if (fs.existsSync('.env.development.local')) {
+  dotenv.config({path: '.env.development.local'})
+} else {
+  dotenv.config({ path: `.env.${process.env.NODE_ENV}` });
+}
 
 const app = expressWs(express()).app;
 const port = 3000;
