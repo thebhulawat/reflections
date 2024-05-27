@@ -1,16 +1,19 @@
 import express, {Request} from 'express'
 import expressWs  from 'express-ws'
 import {RawData, WebSocket} from 'ws'
-import { LLMDummyMock, RetellRequest} from './agent/llmClient';
+import { LlmClient} from './agent/llmClient';
+import dotenv from 'dotenv'
 
 
 declare module 'express-serve-static-core' {
     interface Express extends Application {}
   }
 
+dotenv.config({ path: `.env.${process.env.NODE_ENV}` });
+
 const app = expressWs(express()).app;
 const port = 3000;
-const llmClient = new LLMDummyMock()
+const llmClient = new LlmClient()
 
 app.get('/', (req, res) => {
   res.send('Hello Express!');

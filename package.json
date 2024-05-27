@@ -7,7 +7,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "NODE_ENV=development ts-node src/index.ts"
   },
   "keywords": [],
   "author": "",
@@ -20,8 +20,10 @@
     "typescript": "^5.4.5"
   },
   "dependencies": {
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-ws": "^5.0.2",
+    "openai": "^4.47.1",
     "ws": "^8.17.0"
   }
 }
